@@ -1,5 +1,5 @@
 public class Main {
-    public static void main(String[] args) throws InterruptedException {
+    void main() throws InterruptedException {
         ThreadPool pool = new ThreadPool(3, 10);
 
         for (int i = 1; i <= 6; i++) {
