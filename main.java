@@ -1,4 +1,5 @@
-public class Main {
+public class main {
+
     void main() throws InterruptedException {
         ThreadPool pool = new ThreadPool(3, 10);
 
