@@ -13,7 +13,7 @@ import java.io.*;
  */
 public class RequestJob implements job {
 
-    private static final String WWW_ROOT = "www"; // directorio base de archivos
+    private static final String WWW_ROOT = "/var/www/html"; // directorio base de archivos
 
     private final Socket       connfd;   // conexión heredada del padre
     private final SessionStore sessions;
@@ -52,11 +52,12 @@ public class RequestJob implements job {
             byte[] requestBody = fetcher.fetchBody(contentLength);
 
             // ── Sesión — recordar cliente entre requests ──────
-            String sessionId = sessions.getOrCreate(
-                request.header("cookie"),
-                connfd.getInetAddress().toString()
-            );
+            String clientIp = request.header("x-real-ip");
+            if (clientIp == null || clientIp.isBlank())
+                clientIp = connfd.getInetAddress().toString(); // fallback if no proxy
+            String sessionId = sessions.getOrCreate(request.header("cookie"), clientIp);
             sessions.recordRequest(sessionId, request.path());
+            String sessionCookie = sessions.setCookieHeader(sessionId);
 
             // ── 3. Resolver archivo (chdir implícito a www) ───
             // El thread busca el archivo dentro de WWW_ROOT,
@@ -70,18 +71,18 @@ public class RequestJob implements job {
             byte[] finalBody      = useGzip ? comp.compress() : response.body();
 
             // ── 5. SEND — escribir respuesta al cliente ────────
-            SendWorker sender = new SendWorker(connfd, finalBody, useGzip);
+            SendWorker sender = new SendWorker(connfd, finalBody, useGzip, sessionCookie);
             sender.send(response.statusCode(), response.statusText(), response.contentType());
 
             System.out.printf("[%s] ← %d %s — %d bytes%s%n",
-                workerName, response.statusCode(), response.statusText(),
-                finalBody.length, useGzip ? " (gzip)" : "");
+                    workerName, response.statusCode(), response.statusText(),
+                    finalBody.length, useGzip ? " (gzip)" : "");
 
         } catch (SocketException e) {
             // Cliente cerró la conexión — normal al navegar o recargar
         } catch (Exception e) {
             System.err.printf("[%s] Error inesperado: %s%n",
-                Thread.currentThread().getName(), e.getMessage());
+                    Thread.currentThread().getName(), e.getMessage());
         }
     }
 
@@ -108,18 +109,19 @@ public class RequestJob implements job {
         }
 
         byte[] body = ("<html><body><h1>404 - No encontrado</h1><p>"
-                     + filePath + "</p></body></html>").getBytes("UTF-8");
+                + filePath + "</p></body></html>").getBytes("UTF-8");
         return new ResponseData(404, "Not Found", "text/html; charset=UTF-8", body);
     }
 
     private boolean isCompressible(String path) {
         String p = path.toLowerCase();
         return p.endsWith(".html") || p.endsWith(".css") || p.endsWith(".js")
-            || p.endsWith(".json") || p.endsWith(".svg") || p.equals("/");
+                || p.endsWith(".json") || p.endsWith(".svg") || p.equals("/");
     }
 
     private String contentTypeFor(String path) {
         String p = path.toLowerCase();
+        if (p.endsWith(".txt"))              return "text/plain";
         if (p.endsWith(".css"))              return "text/css";
         if (p.endsWith(".js"))               return "application/javascript";
         if (p.endsWith(".json"))             return "application/json";
