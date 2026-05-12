@@ -19,6 +19,19 @@ public class SessionStore {
     // ConcurrentHashMap: acceso seguro desde múltiples threads sin lock manual
     private final ConcurrentHashMap<String, Session> store = new ConcurrentHashMap<>();
 
+    public SessionStore() {
+        ScheduledExecutorService cleaner = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "session-cleaner");
+            t.setDaemon(true);   // ← daemon so it doesn't block JVM shutdown
+            return t;
+        });
+        cleaner.scheduleAtFixedRate(() ->
+                        store.entrySet().removeIf(e ->
+                                System.currentTimeMillis() - e.getValue().lastSeen > 30 * 60 * 1000L),
+                5, 5, TimeUnit.MINUTES);
+    }
+
+
     /**
      * Retorna el sessionId existente (de la cookie) o crea uno nuevo.
      * @param cookieHeader valor del header "Cookie" del request
